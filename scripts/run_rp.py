@@ -26,8 +26,8 @@ N_CORES_PER_NODE     = 42
 N_CPUS_PER_NODE      = N_CORES_PER_NODE * SMT_LEVEL
 N_GPUS_PER_NODE      = 6
 
-N_EXEC_NODES_MAIN    = 250  # "main" (i.e., active) nodes
-N_EXEC_NODES_SUPP    = 6    # "supplementary" nodes (~2%)
+N_EXEC_NODES_MAIN    = 248  # "main" (i.e., active) nodes
+N_EXEC_NODES_SUPP    = 8    # "supplementary" nodes (~3%)
 N_EXEC_NODES_BASE    = N_EXEC_NODES_MAIN + N_EXEC_NODES_SUPP
 
 CPUS_RANGE_S         = [ 1, 21]     # up to one socket size
@@ -65,24 +65,22 @@ def get_task_cpus_per_generation(n_tasks, n_generations, n_slots,
 def get_task_cpus(n_tasks, ratio_l, n_bases):
     output = []
     # large tasks
-    n_generations_l = 2
     n_tasks_l = int(n_tasks * ratio_l)
     tasks_l = sorted(get_task_cpus_per_generation(
         n_tasks=n_tasks_l,
-        n_generations=n_generations_l,
+        n_generations=N_GENERATIONS_L,
         n_slots=(SMT_LEVEL - 1) * N_CORES_PER_NODE * N_EXEC_NODES_MAIN,
         runtime_range=TASK_RUNTIME_RANGE_L,
         cpus_range=CPUS_RANGE_L), reverse=True, key=lambda x: x[0])
     # set GPUs to the largest tasks
-    for idx in range(N_EXEC_NODES_MAIN * n_generations_l):
+    for idx in range(N_EXEC_NODES_MAIN * N_GENERATIONS_L):
         tasks_l[idx][1] = N_GPUS_PER_NODE
     output.extend(tasks_l * n_bases)
     # small tasks
-    n_generations_s = 4
     n_tasks_s = n_tasks - n_tasks_l
     output.extend(get_task_cpus_per_generation(
         n_tasks=n_tasks_s,
-        n_generations=n_generations_s,
+        n_generations=N_GENERATIONS_S,
         n_slots=N_CORES_PER_NODE * N_EXEC_NODES_MAIN,
         runtime_range=TASK_RUNTIME_RANGE_S,
         cpus_range=CPUS_RANGE_S) * n_bases)
