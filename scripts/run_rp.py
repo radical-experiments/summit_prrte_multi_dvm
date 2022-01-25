@@ -2,7 +2,7 @@
 
 __author__    = 'RADICAL-Cybertools Team'
 __email__     = 'info@radical-cybertools.org'
-__copyright__ = 'Copyright 2021, The RADICAL-Cybertools Team'
+__copyright__ = 'Copyright 2021-2022, The RADICAL-Cybertools Team'
 __license__   = 'MIT'
 
 import argparse
@@ -17,7 +17,7 @@ RESOURCE_NAMES = {
                'project' : None,
                'queue'   : None},
     'remote': {'resource': 'ornl.summit_prte',
-               'project' : 'CHM155_003',
+               'project' : 'GEO111',  # original project used: CHM155_003
                'queue'   : 'debug'}
 }
 
@@ -62,9 +62,8 @@ def get_task_cpus_per_generation(n_tasks, n_generations, n_slots,
     return output
 
 
-def get_task_cpus(n_tasks, ratio_l, n_bases):
+def get_task_cpus_large(n_tasks, ratio_l, n_bases):
     output = []
-    # large tasks
     n_tasks_l = int(n_tasks * ratio_l)
     tasks_l = sorted(get_task_cpus_per_generation(
         n_tasks=n_tasks_l,
@@ -73,11 +72,18 @@ def get_task_cpus(n_tasks, ratio_l, n_bases):
         runtime_range=TASK_RUNTIME_RANGE_L,
         cpus_range=CPUS_RANGE_L), reverse=True, key=lambda x: x[0])
     # set GPUs to the largest tasks
-    for idx in range(N_EXEC_NODES_MAIN * N_GENERATIONS_L):
+    n_tasks_with_gpus = N_EXEC_NODES_MAIN * N_GENERATIONS_L
+    for idx in range(n_tasks_with_gpus):
         tasks_l[idx][1] = N_GPUS_PER_NODE
-    output.extend(tasks_l * n_bases)
-    # small tasks
-    n_tasks_s = n_tasks - n_tasks_l
+    # set tasks with GPUs first
+    output.extend(tasks_l[:n_tasks_with_gpus] * n_bases)
+    output.extend(tasks_l[n_tasks_with_gpus:] * n_bases)
+    return output
+
+
+def get_task_cpus_small(n_tasks, ratio_l, n_bases):
+    output = []
+    n_tasks_s = n_tasks - int(n_tasks * ratio_l)
     output.extend(get_task_cpus_per_generation(
         n_tasks=n_tasks_s,
         n_generations=N_GENERATIONS_S,
@@ -85,6 +91,18 @@ def get_task_cpus(n_tasks, ratio_l, n_bases):
         runtime_range=TASK_RUNTIME_RANGE_S,
         cpus_range=CPUS_RANGE_S) * n_bases)
     return output
+
+
+def generate_task_description(cpus, gpus, runtime):
+    return rp.TaskDescription({'cpu_processes': 1,
+                               'cpu_threads'  : cpus,
+                               'gpu_processes': gpus,
+                               'executable'   : './hello_rp.sh',
+                               'arguments'    : [runtime],
+                               'input_staging': [
+                                   {'source': 'pilot:///hello_rp.sh',
+                                    'target': 'task:///hello_rp.sh',
+                                    'action': rp.LINK}]})
 
 
 def main():
@@ -121,20 +139,21 @@ def main():
         pmgr = rp.PilotManager(session=session)
         tmgr = rp.TaskManager(session=session)
         tmgr.add_pilots(pmgr.submit_pilots(rp.PilotDescription(pd)))
-        task_sizes = get_task_cpus(N_TASKS_BASE, N_TASKS_L_RATIO, opts.nbases)
+
+        # submit "large" tasks first
         tds = []
-        for task_cpus, task_gpus, task_runtime in task_sizes:
-            tds.append(
-                rp.TaskDescription({
-                    'cpu_processes': 1,
-                    'cpu_threads'  : task_cpus,
-                    'gpu_processes': task_gpus,
-                    'executable'   : './hello_rp.sh',
-                    'arguments'    : [task_runtime],
-                    'input_staging': [
-                        {'source': 'pilot:///hello_rp.sh',
-                         'target': 'task:///hello_rp.sh',
-                         'action': rp.LINK}]}))
+        for _cpus, _gpus, _runtime in \
+                get_task_cpus_large(N_TASKS_BASE, N_TASKS_L_RATIO, opts.nbases):
+            tds.append(generate_task_description(_cpus, _gpus, _runtime))
+        tmgr.submit_tasks(tds)
+        # wait until all "large" tasks reach the scheduler
+        tmgr.wait_tasks(state=rp.AGENT_SCHEDULING)
+
+        # submit "small" tasks (after "large" tasks are scheduled)
+        tds = []
+        for _cpus, _gpus, _runtime in \
+                get_task_cpus_small(N_TASKS_BASE, N_TASKS_L_RATIO, opts.nbases):
+            tds.append(generate_task_description(_cpus, _gpus, _runtime))
         tmgr.submit_tasks(tds)
         tmgr.wait_tasks()
     finally:
