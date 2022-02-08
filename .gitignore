@@ -127,3 +127,7 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Project related
+/data/workspace/*
+!/data/workspace/.keep
