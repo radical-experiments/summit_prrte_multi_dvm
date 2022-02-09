@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 
 import radical.analytics as ra
+import radical.utils     as ru
 
 COLUMN_WIDTH = 212
 PAGE_WIDTH   = 516
@@ -42,9 +43,17 @@ class Plotter:
 
             if k not in self.sessions:
                 continue
-            self.sessions[k]['session'] = ra.Session(
+
+            session = ra.Session(
                 '%s/%s' % (self.input_dir, self.sessions[k]['sid']),
                 'radical.pilot')
+
+            self.sessions[k].update({
+                'session' : session,
+                's_pilots': session.filter(etype='pilot', inplace=False),
+                's_tasks' : session.filter(etype='task', inplace=False)})
+            self.sessions[k].update({
+                'pid'     : self.sessions[k]['s_pilots'].list('uid')[0]})
 
     def set_prrte_placement_times(self, s_keys=None, with_comments=False):
         s_keys = s_keys or list(self.sessions.keys())
@@ -157,5 +166,144 @@ class Plotter:
         plt.show()
         if self.save:
             plot_name = 'prrte-placement-time-distr.png'
+            fig.savefig(os.path.join(self.plots_dir, plot_name))
+
+    def plot_concurrency(self, s_keys, x_limits=None):
+
+        s_to_be_loaded = []
+        for s_key in s_keys:
+            if s_key not in self.sessions:
+                return
+            elif not self.sessions[s_key].get('session'):
+                s_to_be_loaded.append(s_key)
+
+        if s_to_be_loaded:
+            self.load_sessions(s_keys=s_to_be_loaded)
+
+        events = {'Task scheduling': [{ru.STATE: 'AGENT_SCHEDULING'},
+                                      {ru.EVENT: 'schedule_ok'}],
+                  'Task execution' : [{ru.EVENT: 'exec_start'},
+                                      {ru.EVENT: 'exec_stop'}]}
+
+        n_subplots = len(s_keys)
+        fig, axarr = plt.subplots(1, n_subplots, figsize=(
+            ra.get_plotsize(PAGE_WIDTH, subplots=(1, n_subplots))))
+
+        sub_label = 'a'
+        for idx, k in enumerate(s_keys):
+
+            if n_subplots > 1:
+                ax = axarr[idx]
+                ax.set_xlabel(
+                    '(%s) %s' % (sub_label, self.sessions[k]['d_dvm_nodes']),
+                    labelpad=10)
+            else:
+                ax = axarr
+
+            p_starttime = self.sessions[k]['s_pilots'].\
+                timestamps(event={ru.EVENT: 'bootstrap_0_start'})[0]
+
+            time_series = {e_name: self.sessions[k]['session'].
+                           concurrency(event=events[e_name])
+                           for e_name in events}
+
+            for e_name in time_series:
+                ax.plot(
+                    [e[0] - p_starttime for e in time_series[e_name]],
+                    [e[1] for e in time_series[e_name]],
+                    label=ra.to_latex(e_name))
+
+            if x_limits and isinstance(x_limits, (list, tuple)):
+                ax.set_xlim(x_limits)
+
+            sub_label = chr(ord(sub_label) + 1)
+
+        fig.legend(['Task scheduling', 'Task execution'],
+                   loc='upper center',
+                   bbox_to_anchor=(0.5, 1.02),
+                   ncol=2)
+        fig.text(0.0, 0.5, 'Number of tasks', va='center', rotation='vertical')
+        fig.text(0.5, 0.05, 'Time (s)', ha='center')
+
+        plt.tight_layout()
+        plt.show()
+        if self.save:
+            plot_name = 'concurrency_%s.png' % '_'.join(s_keys)
+            fig.savefig(os.path.join(self.plots_dir, plot_name))
+
+    def plot_utilization(self, s_key, x_limits=None):
+
+        if s_key not in self.sessions:
+            return
+        elif not self.sessions[s_key].get('session'):
+            self.load_sessions(s_keys=[s_key])
+
+        sid = self.sessions[s_key]['sid']
+        pid = self.sessions[s_key]['pid']
+
+        metrics = [
+            ['Bootstrap', ['boot', 'setup_1'], '#c6dbef'],
+            ['Warmup', ['warm'], '#f0f0f0'],
+            ['Schedule', ['exec_queue', 'exec_prep', 'unschedule'], '#c994c7'],
+            ['Exec RP', ['exec_rp', 'exec_sh', 'term_sh', 'term_rp'], '#fdbb84'],
+            ['Exec Cmd', ['exec_cmd'], '#e31a1c'],
+            ['Cooldown', ['drain'], '#addd8e']
+        ]
+
+        exp = ra.Experiment(
+            ['%s/%s' % (self.input_dir, self.sessions[s_key]['sid'])],
+            stype='radical.pilot')
+        # get the start time of each pilot
+        p_zeros = ra.get_pilots_zeros(exp)
+
+        fig, axarr = plt.subplots(1, 2, figsize=(
+            ra.get_plotsize(PAGE_WIDTH, subplots=(1, 2))))
+
+        sub_label = 'a'
+        legend = None
+        for idx, rtype in enumerate(['cpu', 'gpu']):
+
+            provided, consumed, stats_abs, stats_rel, info = exp.utilization(
+                metrics=metrics, rtype=rtype)
+
+            # generate the subplot with labels
+            legend, patches, x, y = ra.get_plot_utilization(
+                metrics, consumed, p_zeros[sid][pid], sid)
+
+            # place all the patches, one for each metric, on the axes
+            for patch in patches:
+                axarr[idx].add_patch(patch)
+
+            if x_limits and isinstance(x_limits, (list, tuple)):
+                axarr[idx].set_xlim(x_limits)
+            else:
+                axarr[idx].set_xlim([x['min'], x['max']])
+            axarr[idx].set_ylim([y['min'], y['max']])
+            axarr[idx].yaxis.set_major_locator(mticker.MaxNLocator(5))
+            axarr[idx].xaxis.set_major_locator(mticker.MaxNLocator(5))
+
+            if rtype == 'cpu':
+                # Specific to Summit when using SMT=4 (default)
+                axarr[idx].yaxis.set_major_formatter(
+                    mticker.FuncFormatter(lambda z, pos: int(z / 4)))
+
+            axarr[idx].set_xlabel('(%s)' % sub_label, labelpad=10)
+            sub_label = chr(ord(sub_label) + 1)
+            if rtype == 'cpu':
+                axarr[idx].set_ylabel('Number of CPU cores')
+            elif rtype == 'gpu':
+                axarr[idx].set_ylabel('Number of GPUs')
+            axarr[idx].set_title(' ')  # placeholder
+
+        fig.legend(legend, [m[0] for m in metrics],
+                   loc='upper center',
+                   bbox_to_anchor=(0.5, 1.03),
+                   ncol=len(metrics))
+        fig.text(0.5, 0.05, 'Time (s)', ha='center')
+
+        plt.tight_layout()
+        plt.show()
+        if self.save:
+            plot_name = 'utilization_%s.png' % s_key
             fig.savefig(os.path.join(self.plots_dir, plot_name))
 
