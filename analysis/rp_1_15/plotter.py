@@ -89,11 +89,11 @@ class Plotter:
                 exec_start = exec_stop = app_start = 0.
                 with open('%s.prof' % f_path, encoding='utf8') as fd:
                     for line in fd.readlines():
-                        if 'task_exec_start' in line:
+                        if 'exec_start' in line:
                             exec_start = float(line.split(',')[0])
                         elif 'app_start' in line:
                             app_start = float(line.split(',')[0])
-                        elif 'task_exec_stop' in line:
+                        elif 'exec_stop' in line:
                             exec_stop = float(line.split(',')[0])
 
                 if not exec_start:
@@ -277,7 +277,7 @@ class Plotter:
         if s_to_be_loaded:
             self.load_sessions(s_keys=s_to_be_loaded)
 
-        events = {'Setup'      : [{ru.EVENT: 'task_exec_start'},
+        events = {'Setup'      : [{ru.EVENT: 'exec_start'},
                                   {ru.EVENT: 'app_start'}],
                   'Running'    : [{ru.EVENT: 'app_start'},
                                   {ru.EVENT: 'app_stop'}],
@@ -477,10 +477,10 @@ class Plotter:
                 exp._sessions[0],
                 rtype,
                 {'consume': {
-                    'exec_setup'  : [{ru.EVENT: 'task_exec_start'  },
-                                     {ru.EVENT: 'app_start'        }],
-                    'exec_run'    : [{ru.EVENT: 'app_start'        },
-                                     {ru.EVENT: 'app_stop'         }]}})
+                    'exec_setup'  : [{ru.EVENT: 'launch_start' },
+                                     {ru.EVENT: 'app_start'  }],
+                    'exec_run'    : [{ru.EVENT: 'app_start'  },
+                                     {ru.EVENT: 'app_stop'   }]}})
 
             # generate the subplot with labels
             legend, patches, x, y = ra.get_plot_utilization(
@@ -538,10 +538,10 @@ class Plotter:
             ],
             'task': [
                 [{1: 'schedule_ok'}           , 'Idle'       , 'Exec_rp'    ],
-                [{1: 'task_exec_start'}       , 'Exec_rp'    , 'Exec_prte'  ],
+                [{1: 'exec_start'}       , 'Exec_rp'    , 'Exec_prte'  ],
                 [{1: 'app_start'}             , 'Exec_prte'  , 'Exec_app'   ],
                 [{1: 'app_stop'}              , 'Exec_app'   , 'Exec_prte'  ],
-                [{1: 'task_exec_stop'}        , 'Exec_prte'  , 'Exec_rp'    ],
+                [{1: 'exec_stop'}        , 'Exec_prte'  , 'Exec_rp'    ],
                 [{1: 'unschedule_stop'}       , 'Exec_rp'    , 'Idle'       ]
             ],
         }
