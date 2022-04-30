@@ -129,5 +129,6 @@ dmypy.json
 .pyre/
 
 # Project related
+/data/raw/archive/*
 /data/workspace/*
 !/data/workspace/.keep
